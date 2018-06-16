@@ -41,13 +41,15 @@ var localStorageSupported = (function () {
         'ui.bootstrap',
         'fitText',
         'angular-chartist',
+        'chart.js',
         'gridstack-angular',
         'ngCookies',
         'validation.match',
         'as.sortable',
         'ui.select',
         'angular-jwt',
-        'angularUtils.directives.dirPagination'
+        'angularUtils.directives.dirPagination',
+        'ngRateIt'
     ])
 
         .config(['$httpProvider', 'jwtOptionsProvider',

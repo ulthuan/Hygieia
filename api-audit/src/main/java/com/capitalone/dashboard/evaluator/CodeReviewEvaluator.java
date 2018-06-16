@@ -1,5 +1,6 @@
 package com.capitalone.dashboard.evaluator;
 
+import com.capitalone.dashboard.ApiSettings;
 import com.capitalone.dashboard.common.CommonCodeReview;
 import com.capitalone.dashboard.model.AuditException;
 import com.capitalone.dashboard.model.CollectorItem;
@@ -8,6 +9,7 @@ import com.capitalone.dashboard.model.Commit;
 import com.capitalone.dashboard.model.CommitType;
 import com.capitalone.dashboard.model.Dashboard;
 import com.capitalone.dashboard.model.GitRequest;
+import com.capitalone.dashboard.model.SCM;
 import com.capitalone.dashboard.repository.CommitRepository;
 import com.capitalone.dashboard.repository.GitRequestRepository;
 import com.capitalone.dashboard.response.CodeReviewAuditResponseV2;
@@ -26,17 +28,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Component
 public class CodeReviewEvaluator extends Evaluator<CodeReviewAuditResponseV2> {
 
     private final CommitRepository commitRepository;
     private final GitRequestRepository gitRequestRepository;
+    protected ApiSettings settings;
 
     @Autowired
-    public CodeReviewEvaluator(CommitRepository commitRepository, GitRequestRepository gitRequestRepository) {
+    public CodeReviewEvaluator(CommitRepository commitRepository, GitRequestRepository gitRequestRepository, ApiSettings settings) {
         this.commitRepository = commitRepository;
         this.gitRequestRepository = gitRequestRepository;
+        this.settings = settings;
     }
 
 
@@ -91,7 +96,12 @@ public class CodeReviewEvaluator extends Evaluator<CodeReviewAuditResponseV2> {
     private CodeReviewAuditResponseV2 getPeerReviewResponses(CollectorItem repoItem,
                                                              long beginDt, long endDt) {
 
+        CodeReviewAuditResponseV2 reviewAuditResponseV2 = new CodeReviewAuditResponseV2();
 
+        if (repoItem == null) {
+            reviewAuditResponseV2.addAuditStatus(CodeReviewAuditStatus.REPO_NOT_CONFIGURED);
+            return reviewAuditResponseV2;
+        }
         String scmUrl = (String) repoItem.getOptions().get("url");
         String scmBranch = (String) repoItem.getOptions().get("branch");
 
@@ -108,12 +118,20 @@ public class CodeReviewEvaluator extends Evaluator<CodeReviewAuditResponseV2> {
 
         }
 
+        //if the collector item is pending data collection
+        if (repoItem.getLastUpdated() == 0) {
+            reviewAuditResponseV2.addAuditStatus(CodeReviewAuditStatus.PENDING_DATA_COLLECTION);
+
+            reviewAuditResponseV2.setLastUpdated(repoItem.getLastUpdated());
+            reviewAuditResponseV2.setBranch(scmBranch);
+            reviewAuditResponseV2.setUrl(scmUrl);
+            return reviewAuditResponseV2;
+        }
+
         List<GitRequest> pullRequests = gitRequestRepository.findByCollectorItemIdAndMergedAtIsBetween(repoItem.getId(), beginDt-1, endDt+1);
         List<Commit> commits = commitRepository.findByCollectorItemIdAndScmCommitTimestampIsBetween(repoItem.getId(), beginDt-1, endDt+1);
         commits.sort(Comparator.comparing(Commit::getScmCommitTimestamp).reversed());
         pullRequests.sort(Comparator.comparing(GitRequest::getMergedAt).reversed());
-
-        CodeReviewAuditResponseV2 reviewAuditResponseV2 = new CodeReviewAuditResponseV2();
 
         if (CollectionUtils.isEmpty(pullRequests)) {
             reviewAuditResponseV2.addAuditStatus(CodeReviewAuditStatus.NO_PULL_REQ_FOR_DATE_RANGE);
@@ -131,20 +149,29 @@ public class CodeReviewEvaluator extends Evaluator<CodeReviewAuditResponseV2> {
         reviewAuditResponseV2.setLastUpdated(repoItem.getLastUpdated());
 
         //                reviewAuditResponseV2.addPullRequest(pullRequestAudit);
-        pullRequests.forEach(pr -> {
-            String mergeSha = pr.getScmRevisionNumber();
-            Optional<Commit> mergeOptionalCommit = commits.stream().filter(c -> Objects.equals(c.getScmRevisionNumber(), mergeSha)).findFirst();
+        List<String> allPrCommitShas = new ArrayList<>();
+        pullRequests.stream().filter(pr -> "merged".equalsIgnoreCase(pr.getState())).forEach(pr -> {
+            Optional<Commit> mergeOptionalCommit = commits.stream().filter(c -> Objects.equals(c.getScmRevisionNumber(), pr.getScmRevisionNumber())).findFirst();
             Commit mergeCommit = mergeOptionalCommit.orElse(null);
+
             if (mergeCommit == null) {
-//                reviewAuditResponseV2.addPullRequest(pullRequestAudit);
-                return;
+                mergeOptionalCommit = commits.stream().filter(c -> Objects.equals(c.getScmRevisionNumber(), pr.getScmMergeEventRevisionNumber())).findFirst();
+                mergeCommit = mergeOptionalCommit.orElse(null);
             }
+
             CodeReviewAuditResponseV2.PullRequestAudit pullRequestAudit = new CodeReviewAuditResponseV2.PullRequestAudit();
             pullRequestAudit.setPullRequest(pr);
             List<Commit> commitsRelatedToPr = pr.getCommits();
             commitsRelatedToPr.sort(Comparator.comparing(e -> (e.getScmCommitTimestamp())));
-            pullRequestAudit.addAuditStatus(pr.getUserId().equalsIgnoreCase(mergeCommit.getScmAuthorLogin()) ? CodeReviewAuditStatus.COMMITAUTHOR_EQ_MERGECOMMITER : CodeReviewAuditStatus.COMMITAUTHOR_NE_MERGECOMMITER);
-            boolean peerReviewed = CommonCodeReview.computePeerReviewStatus(pr, settings, pullRequestAudit);
+            if (mergeCommit == null) {
+                pullRequestAudit.addAuditStatus(CodeReviewAuditStatus.MERGECOMMITER_NOT_FOUND);
+            } else {
+                pullRequestAudit.addAuditStatus(pr.getUserId().equalsIgnoreCase(mergeCommit.getScmAuthorLogin()) ? CodeReviewAuditStatus.COMMITAUTHOR_EQ_MERGECOMMITER : CodeReviewAuditStatus.COMMITAUTHOR_NE_MERGECOMMITER);
+            }
+
+            allPrCommitShas.addAll(commitsRelatedToPr.stream().map(SCM::getScmRevisionNumber).collect(Collectors.toList()));
+
+            boolean peerReviewed = CommonCodeReview.computePeerReviewStatus(pr, settings, pullRequestAudit, commits);
             pullRequestAudit.addAuditStatus(peerReviewed ? CodeReviewAuditStatus.PULLREQ_REVIEWED_BY_PEER : CodeReviewAuditStatus.PULLREQ_NOT_PEER_REVIEWED);
             String sourceRepo = pr.getSourceRepo();
             String targetRepo = pr.getTargetRepo();
@@ -153,7 +180,46 @@ public class CodeReviewEvaluator extends Evaluator<CodeReviewAuditResponseV2> {
         });
 
         //check any commits not directly tied to pr
-        commits.stream().filter(commit -> StringUtils.isEmpty(commit.getPullNumber()) && commit.getType() == CommitType.New).forEach(reviewAuditResponseV2::addDirectCommit);
+        commits.stream().filter(commit -> !allPrCommitShas.contains(commit.getScmRevisionNumber()) && StringUtils.isEmpty(commit.getPullNumber()) && commit.getType() == CommitType.New).forEach(reviewAuditResponseV2::addDirectCommit);
+
+        //check any commits not directly tied to pr
+
+        List<Commit> commitsNotDirectlyTiedToPr = new ArrayList<>();
+        commits.forEach(commit -> {
+            if (!allPrCommitShas.contains(commit.getScmRevisionNumber()) &&
+                    StringUtils.isEmpty(commit.getPullNumber()) && commit.getType() == CommitType.New) {
+                commitsNotDirectlyTiedToPr.add(commit);
+                // auditServiceAccountChecks includes - check for service account and increment version tag for service account on direct commits.
+                auditServiceAccountChecks(reviewAuditResponseV2, commit);
+            }
+        });
+
         return reviewAuditResponseV2;
+    }
+
+    private void auditServiceAccountChecks(CodeReviewAuditResponseV2 reviewAuditResponseV2, Commit commit) {
+        if (StringUtils.isEmpty(commit.getScmAuthorLDAPDN())) {
+            reviewAuditResponseV2.addAuditStatus(commit.isFirstEverCommit() ? CodeReviewAuditStatus.DIRECT_COMMITS_TO_BASE_FIRST_COMMIT : CodeReviewAuditStatus.DIRECT_COMMITS_TO_BASE);
+        } else {
+            auditDirectCommits(reviewAuditResponseV2, commit);
+        }
+    }
+
+    private void auditDirectCommits(CodeReviewAuditResponseV2 reviewAuditResponseV2, Commit commit) {
+        if ( CommonCodeReview.checkForServiceAccount(commit.getScmAuthorLDAPDN(), settings)) {
+            reviewAuditResponseV2.addAuditStatus(CodeReviewAuditStatus.COMMITAUTHOR_EQ_SERVICEACCOUNT);
+            auditIncrementVersionTag(reviewAuditResponseV2, commit, CodeReviewAuditStatus.DIRECT_COMMIT_NONCODE_CHANGE_SERVICE_ACCOUNT);
+        } else {
+            auditIncrementVersionTag(reviewAuditResponseV2, commit, CodeReviewAuditStatus.DIRECT_COMMIT_NONCODE_CHANGE_USER_ACCOUNT);
+
+        }
+    }
+
+    private void auditIncrementVersionTag(CodeReviewAuditResponseV2 reviewAuditResponseV2, Commit commit, CodeReviewAuditStatus directCommitIncrementVersionTagStatus) {
+        if (CommonCodeReview.matchIncrementVersionTag(commit.getScmCommitLog(), settings)) {
+            reviewAuditResponseV2.addAuditStatus(directCommitIncrementVersionTagStatus);
+        }else{
+            reviewAuditResponseV2.addAuditStatus(commit.isFirstEverCommit() ? CodeReviewAuditStatus.DIRECT_COMMITS_TO_BASE_FIRST_COMMIT : CodeReviewAuditStatus.DIRECT_COMMITS_TO_BASE);
+        }
     }
 }

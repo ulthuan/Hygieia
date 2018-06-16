@@ -6,6 +6,7 @@ import com.capitalone.dashboard.repository.ApiTokenRepository;
 import com.capitalone.dashboard.repository.AuthenticationRepository;
 import com.capitalone.dashboard.repository.DashboardRepository;
 import com.capitalone.dashboard.repository.UserInfoRepository;
+
 import com.capitalone.dashboard.service.ApiTokenService;
 import com.capitalone.dashboard.service.ApiTokenServiceImpl;
 import com.capitalone.dashboard.service.AuthenticationService;
@@ -20,6 +21,7 @@ import com.capitalone.dashboard.service.CmdbService;
 import com.capitalone.dashboard.service.CodeQualityService;
 import com.capitalone.dashboard.service.CollectorService;
 import com.capitalone.dashboard.service.CommitService;
+import com.capitalone.dashboard.service.ConfigurationService;
 import com.capitalone.dashboard.service.DashboardRemoteService;
 import com.capitalone.dashboard.service.DashboardService;
 import com.capitalone.dashboard.service.DefaultAuthenticationServiceImpl;
@@ -32,6 +34,7 @@ import com.capitalone.dashboard.service.MaturityModelService;
 import com.capitalone.dashboard.service.Monitor2Service;
 import com.capitalone.dashboard.service.PerformanceService;
 import com.capitalone.dashboard.service.PipelineService;
+import com.capitalone.dashboard.service.RallyFeatureService;
 import com.capitalone.dashboard.service.ScopeService;
 import com.capitalone.dashboard.service.ServiceService;
 import com.capitalone.dashboard.service.TeamService;
@@ -39,6 +42,9 @@ import com.capitalone.dashboard.service.TemplateService;
 import com.capitalone.dashboard.service.TestResultService;
 import com.capitalone.dashboard.service.UserInfoService;
 import com.capitalone.dashboard.service.UserInfoServiceImpl;
+
+import com.capitalone.dashboard.service.*;
+
 import com.capitalone.dashboard.util.PaginationHeaderUtility;
 import org.mockito.Mockito;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -90,6 +96,11 @@ public class TestAuthConfig {
         return Mockito.mock(BuildService.class);
     }
 
+    @Bean
+    public ConfigurationService configurationService() {
+        return Mockito.mock(ConfigurationService.class);
+    }
+    
     @Bean
     public CollectorService collectorService() {
         return Mockito.mock(CollectorService.class);
@@ -206,6 +217,11 @@ public class TestAuthConfig {
     }
 
     @Bean
+    public RallyFeatureService rallyFeatureService() {
+        return Mockito.mock(RallyFeatureService.class);
+    }
+    
+    @Bean
     public CmdbService cmdbService() {
         return Mockito.mock(CmdbService.class);
     }
@@ -235,6 +251,19 @@ public class TestAuthConfig {
         return Mockito.mock(AuthenticationService.class);
     }
 
+    @Bean
+    public ScoreService scoreService() {
+        return Mockito.mock(ScoreService.class);
+    }
 
+    @Bean
+    public ScoreCriteriaSettingsService scoreCriteriaSettingsService() {
+        return Mockito.mock(ScoreCriteriaSettingsService.class);
+    }
+
+    @Bean
+    public ScoreDashboardService scoreDashboardService() {
+        return Mockito.mock(ScoreDashboardService.class);
+    }
 }
 

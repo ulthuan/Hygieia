@@ -9,8 +9,8 @@
         .controller('AdminController', AdminController);
 
 
-    AdminController.$inject = ['$scope', 'dashboardData', '$location', '$uibModal', 'userService', 'authService', 'userData', 'dashboardService', 'templateMangerData'];
-    function AdminController($scope, dashboardData, $location, $uibModal, userService, authService, userData, dashboardService, templateMangerData) {
+    AdminController.$inject = ['$scope', 'dashboardData', '$location', '$uibModal', 'userService', 'authService', 'userData', 'dashboardService', 'templateMangerData', 'paginationWrapperService','$sce'];
+    function AdminController($scope, dashboardData, $location, $uibModal, userService, authService, userData, dashboardService, templateMangerData, paginationWrapperService,$sce) {
         var ctrl = this;
         if (userService.isAuthenticated() && userService.isAdmin()) {
             $location.path('/admin');
@@ -35,6 +35,11 @@
         ctrl.editTemplate = editTemplate;
         ctrl.deleteToken = deleteToken;
         ctrl.editToken = editToken;
+
+        ctrl.pageChangeHandler = pageChangeHandler;
+        ctrl.totalItems = totalItems;
+        ctrl.currentPage = currentPage;
+        ctrl.pageSize = pageSize;
 
         $scope.tab = "dashboards";
 
@@ -62,13 +67,11 @@
             ctrl.theme = localStorage.getItem('theme');
         }
 
-
         // ctrl.dashboards = []; don't default since it's used to determine loading
 
         // public methods
         ctrl.deleteDashboard = deleteDashboard;
         ctrl.applyTheme = applyTheme;
-
 
         // request dashboards
         dashboardData.search().then(processResponse);
@@ -76,6 +79,24 @@
         userData.apitokens().then(processTokenResponse);
         templateMangerData.getAllTemplates().then(processTemplateResponse);
 
+        function pageChangeHandler(pageNumber) {
+            paginationWrapperService.pageChangeHandler(pageNumber)
+                .then(function() {
+                    ctrl.dashboards = paginationWrapperService.getDashboards();
+                });
+        }
+
+        function totalItems() {
+            return paginationWrapperService.getTotalItems();
+        }
+
+        function currentPage() {
+            return paginationWrapperService.getCurrentPage();
+        }
+
+        function pageSize() {
+            return paginationWrapperService.getPageSize();
+        }
 
         //implementation of logout
         function logout() {
@@ -99,6 +120,7 @@
             dashboardData.delete(id).then(function () {
                 _.remove(ctrl.dashboards, {id: id});
             });
+            paginationWrapperService.calculateTotalItems();
         }
 
         function editDashboard(item) {
@@ -121,10 +143,9 @@
                 userData.apitokens().then(processTokenResponse);
                 templateMangerData.getAllTemplates().then(processTemplateResponse);
             });
-
         }
-        function editToken(item)
-        {
+
+        function editToken(item) {
             console.log("Edit token in Admin");
 
             var mymodalInstance=$uibModal.open({
@@ -141,13 +162,14 @@
             mymodalInstance.result.then(function() {
                 userData.apitokens().then(processTokenResponse);
             });
-
         }
+
         function deleteToken(id) {
             userData.deleteToken(id).then(function() {
                 _.remove( $scope.apitokens , {id: id});
             });
         }
+
         function generateToken() {
             console.log("Generate token in Admin");
 
@@ -161,22 +183,10 @@
             mymodalInstance.result.then(function (condition) {
                 window.location.reload(false);
             });
-
         }
 
         function processResponse(data) {
-            ctrl.dashboards = [];
-            for (var x = 0; x < data.length; x++) {
-                ctrl.dashboards.push({
-                    id: data[x].id,
-                    name: dashboardService.getDashboardTitle(data[x]),
-                    type: data[x].type,
-                    validServiceName: data[x].validServiceName,
-                    validAppName: data[x].validAppName,
-                    configurationItemBusServName: data[x].configurationItemBusServName,
-                    configurationItemBusAppName: data[x].configurationItemBusAppName,
-                });
-            }
+            ctrl.dashboards = paginationWrapperService.processDashboardResponse({"data" : data});
         }
 
         function processUserResponse(response) {
@@ -315,6 +325,60 @@
                     $scope.error = error;
                 }
             );
+        }
+ 
+//Configuration settings functionality starts here
+        dashboardData.getGeneralConfig().then(processGeneralConfigResponse);
+        function processGeneralConfigResponse(data){
+                $scope.choices = data;
+        }
+
+        $scope.oneAtATime = false;
+        $scope.configTooltip = $sce.trustAsHtml("<ul class='tooltipList'><li>Url Should be the  server URL along with port, from where the jobs/appications have to be fetched.</li><li>Username Should be the functional username which has access to all the jobs/applications</li><li>Password Should be the corresponding password for the functional account</li></ul>");
+        $scope.status = {
+            isCustomHeaderOpen: true,
+            open:true
+        };
+        $scope.showpassword = false;
+        $scope.changePassIcon = function(){
+            $scope.showpassword = !$scope.showpassword;
+        }
+        $scope.addNewConfig = function(objKey) {
+            $scope.choices[objKey].info.push({}); 
+        };
+
+        $scope.removeNewConfig = function(item,objKey) {
+            $scope.choices[objKey].info.splice(item,1);
+
+        };
+        $scope.removeConfigHead = function(e, objKey){
+        e.preventDefault()
+        $scope.choices.splice(objKey,1);
+        }
+        $scope.generalConfigFormSave =function(form, obj){
+
+            if(form.$valid){
+                  dashboardData.generalConfigSave(obj).then(
+                    function(response) {
+                        swal('Configuration saved successfully!!');
+                    },
+                    function(error) {
+                        swal('Configuration not saved !!');
+                    }
+                );
+           }else{
+            $scope.status.open = true;
+           }
+        }
+        $scope.togglePasswordType = function(idKey,classKey){
+            var inputType = document.getElementById(idKey).type;
+            if(inputType=="password"){
+                document.getElementById(idKey).type="text";
+                document.getElementById(classKey).className="fa fa-eye-slash";
+            }else{
+                document.getElementById(idKey).type="password";
+                document.getElementById(classKey).className="fa fa-eye";                
+            }
         }
 
     }
